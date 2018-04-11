@@ -142,13 +142,16 @@ class DebevecMethod(Weights):
 #
 
 class ToneMapping():
-    
+   
+    def __init__(self):
+        self.bgr_string = ['blue', 'green', 'red']
+        
     def photographic_global(self, hdr, d=1e-6, a=0.7):
         
         ldr = np.zeros_like(hdr, dtype=np.float32)
         
         for c in range(3):
-            print('\r[Photographic Global] color:', c, end='')
+            print('\r[Photographic Global] color: ' + self.bgr_string[c], end=' ' * 10)
             Lw = hdr[:, :, c]
             Lw_ave = np.exp(np.mean(np.log(d + Lw)))
             Lm = (a / Lw_ave) * Lw
@@ -191,7 +194,7 @@ class ToneMapping():
         ldr = np.zeros_like(hdr, dtype=np.float32)
         
         for c in range(3):
-            print('[Photographic Local] color:', c)
+            print('[Photographic Local] color: ' + self.bgr_string[c], end=' ' * 10)
             Lw = hdr[:, :, c]
             Lw_ave = np.exp(np.mean(np.log(d + Lw)))
             Lm = (a / Lw_ave) * Lw
@@ -205,7 +208,7 @@ class ToneMapping():
         ldr = np.zeros_like(hdr, dtype=np.float32)
         
         for c in range(3):
-            print('[Bilateral Filtering] color:', c)
+            print('\r[Bilateral Filtering] color: ' + self.bgr_string[c], end=' ' * 10)
             
             Lw = hdr[:, :, c]
             log_Lw = np.log(Lw)
@@ -217,5 +220,6 @@ class ToneMapping():
             Ld = np.exp(log_Ld) / np.exp(cf * log_base.max())
             
             ldr[:, :, c] = Ld * 255
+        print()
         
         return ldr

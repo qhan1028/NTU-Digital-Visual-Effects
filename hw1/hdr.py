@@ -22,48 +22,66 @@ t = Timer()
 class HDR(ImageAlignment, DebevecMethod, ToneMapping):
     
     def __init__(self, savedir='res'):
-        self.bgr_string = ['b', 'g', 'r']
+        self.bgr_string = ['blue', 'green', 'red']
         self.weight_type = 2
         self.savedir = savedir
         if not osp.exists(savedir): os.mkdir(savedir)
         print('[Init] savedir:', savedir)
         
-    def read_images(self, dirname='images'):
+    def read_images(self, dirname):
+        
+        def is_image(filename):
+            name, ext = osp.splitext(osp.basename(filename))
+            return ext in ['.jpg', '.png']
+        
         self.images = []
         self.images_rgb = []
 
         for filename in os.listdir(dirname):
-            self.images += [cv2.imread(dirname + '/' + filename)]
-            self.images_rgb += [cv2.cvtColor(self.images[-1], cv2.COLOR_BGR2RGB)]
+            if is_image(filename):
+                self.images += [cv2.imread(dirname + '/' + filename)]
+                self.images_rgb += [cv2.cvtColor(self.images[-1], cv2.COLOR_BGR2RGB)]
 
         self.height, self.width, self.channel = self.images[0].shape
         print('[Read] image shape:', self.images[0].shape)
         
         self.P = len(self.images)
-        print('[Read] # images =', self.P)
+        print('[Read] # images:', self.P)
 
-    def display_images(self):
-        fig, axes = plt.subplots(4, 4, figsize=(15, 15))
-        for p in range(self.P):
-            row = int(p / 4)
-            col = int(p % 4)
-            axes[row, col].imshow(self.images_rgb[p])
-        plt.show()
+    def display_inputs(self):
+        b = np.ceil((np.sqrt(self.P))).astype(int)
+        fig, axes = plt.subplots(b, b, figsize=(4 * b, 4 * b))
         
-    def read_shutter_times(self, dirname='images'):
-        # read txt file
-        self.shutter_times = np.array([1/90., 1/60., 1/45., 1/30., 
-                                       1/20., 1/15., 1/10.,  1/8., 
-                                        1/6.,  1/4.,  1/3.,  1/2., 
-                                       1/1.5,    1.,   1.5,    2.], dtype=np.float32)
-        self.log_st = np.log(self.shutter_times).astype(np.float32)
+        for p in range(self.P): 
+            axes[int(p / b), int(p % b)].imshow(self.images_rgb[p])
+            
+        fig.savefig(self.savedir + '/input_images.png', bbox_inches='tight', dpi=256)
+        
+    def read_shutter_times(self, dirname):        
+        with open(dirname + '/shutter_times.txt', 'r') as f:
+            shutter_times = []
+            st_string = []
+            
+            for line in f.readlines():
+                line = line.replace('\n', '')
+                st_string += [line]
+                
+                if '/' in line:
+                    a, b = np.float32(line.split('/'))
+                    shutter_times += [a/b]
+                else:
+                    shutter_times += [np.float32(line)]
+        
+        self.shutter_times = np.array(shutter_times, dtype=np.float32)
+        self.log_st = np.log(shutter_times, dtype=np.float32)
+        self.st_string = st_string
         
     def sample_points(self, w_points, h_points):
         xp = np.random.randint(0, self.width, w_points)
         yp = np.random.randint(0, self.height, h_points)
 
         self.N = len(xp) * len(yp) # number of selected pixels
-        print('[Sample Points] # samples per image =', self.N)
+        print('[Sample Points] # samples per image:', self.N)
 
         xv, yv = np.meshgrid(xp, yp)
         self.Z_bgr = [[self.images[p][yv, xv, c] for p in range(self.P)] for c in range(3)]
@@ -82,14 +100,14 @@ class HDR(ImageAlignment, DebevecMethod, ToneMapping):
         plt.clf()
         fig, axes = plt.subplots(1, 3, figsize=(15, 5))
 
-        for c in range(3):
+        for c in range(3): # BGR channels
 
             W_sum = np.zeros([h, w], dtype=np.float32) + 1e-8
             log_radiance_sum = np.zeros([h, w], dtype=np.float32)
 
-            for p in range(self.P):
+            for p in range(self.P): # different shutter times
 
-                print('\r[Radiance] color=' + self.bgr_string[c] + ', st=%.4f' % (self.shutter_times[p]), end='       ')
+                print('\r[Radiance] color: ' + self.bgr_string[c] + ', st: ' + self.st_string[p], end='     ')
 
                 im_1D = images[p][:, :, c].flatten()
                 log_radiance = (LnG_bgr[c][im_1D] - log_st[p]).reshape(h, w)
@@ -109,8 +127,8 @@ class HDR(ImageAlignment, DebevecMethod, ToneMapping):
             divider = make_axes_locatable(ax)
             cax = divider.append_axes("right", size="5%", pad=0.05)
             fig.colorbar(im, cax=cax, format=ticker.FuncFormatter(fmt))
-
         print()
+        
         fig.savefig(self.savedir + '/radiance_debevec.png', bbox_inches='tight', dpi=256)
         
         self.log_radiance_bgr = log_radiance_bgr
@@ -137,10 +155,10 @@ class HDR(ImageAlignment, DebevecMethod, ToneMapping):
     def solve_bgr(self):
         self.LnG_bgr = [self.solve(Z, self.log_st, self.N, self.P) for Z in self.Z_bgr]
         
-    def process(self, dirname):
-        self.read_images(dirname)
-        #self.display_images()
-        self.read_shutter_times(dirname)
+    def process(self, indir):        
+        self.read_images(indir)
+        self.display_inputs()
+        self.read_shutter_times(indir)
         self.sample_points(10, 10)
         
         self.solve_bgr()
@@ -166,5 +184,8 @@ if __name__ == '__main__':
     args = vars(parser.parse_args())
     
     # Example Usage
-    hdr = HDR()
-    res = hdr.process(args['input_dir'])
+    indir = args['input_dir']
+    savedir = indir + '_res'
+    
+    hdr = HDR(savedir=savedir)
+    res = hdr.process(indir)
