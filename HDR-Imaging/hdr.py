@@ -29,7 +29,6 @@ class HDR(ImageAlignment, DebevecMethod, ToneMapping):
         print('[Init] savedir:', savedir)
         
     def read_images(self, dirname):
-        
         def is_image(filename):
             name, ext = osp.splitext(osp.basename(filename))
             return ext in ['.jpg', '.png']
@@ -86,7 +85,6 @@ class HDR(ImageAlignment, DebevecMethod, ToneMapping):
         xv, yv = np.meshgrid(xp, yp)
         self.Z_bgr = [[self.images[p][yv, xv, c] for p in range(self.P)] for c in range(3)]
         
-    # G_bgr need to be log
     def compute_radiance(self, images=None, LnG_bgr=None, log_st=None):
         if images is None: images = self.images
         if LnG_bgr is None: LnG_bgr = self.LnG_bgr
@@ -153,6 +151,7 @@ class HDR(ImageAlignment, DebevecMethod, ToneMapping):
         fig.savefig(self.savedir + '/response_curve.png', bbox_inches='tight', dpi=256)
         
     def solve_bgr(self):
+        # self.solve() is inherited from DebevecMethod class
         self.LnG_bgr = [self.solve(Z, self.log_st, self.N, self.P) for Z in self.Z_bgr]
         
     def process(self, indir):        
@@ -165,13 +164,13 @@ class HDR(ImageAlignment, DebevecMethod, ToneMapping):
         self.compute_radiance()
         self.response_curve()
         
-        ldr1 = self.photographic_global(self.radiance_bgr)
+        ldr1 = self.photographic_global(self.radiance_bgr) # inherited from ToneMapping class
         cv2.imwrite(self.savedir + "/result_photographic_global.jpg", ldr1)
         
-        ldr2 = self.photographic_local(self.radiance_bgr)
+        ldr2 = self.photographic_local(self.radiance_bgr) # inherited from ToneMapping class
         cv2.imwrite(self.savedir + "/result_photographic_local.jpg", ldr2)
         
-        ldr3 = self.bilateral_filtering(self.radiance_bgr)
+        ldr3 = self.bilateral_filtering(self.radiance_bgr) # inherited from ToneMapping class
         cv2.imwrite(self.savedir + "/result_bilateral_filtering.jpg", ldr3)
         
         return ldr2
