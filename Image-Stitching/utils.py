@@ -1,7 +1,8 @@
 #
 #   Image Stitching: Utilities
 #   Written by Qhan
-#   2018.5.20
+#   First Version: 2018.5.20
+#   Last Update: 2018.5.22
 #
 
 import cv2
@@ -13,12 +14,14 @@ import pandas as pd
 from scipy.spatial.distance import cdist
 
 
-#
-#   Cylinder Warping
-#
+########################
+#                      #
+#   Cylinder Warping   #
+#                      #
+########################
 
-def cylinder_warping(images, savedir='cw/', focals=[]):
-    if not osp.exists(savedir): os.mkdir(savedir)
+def cylinder_warping(images, focals=[], save_cw=False, savedir='cw/'):
+    if save_cw and not osp.exists(savedir): os.mkdir(savedir)
     if len(focals) == 0: focals = np.ones(len(images)) * 6000.
     
     n, h, w = images.shape[:3]
@@ -73,16 +76,18 @@ def cylinder_warping(images, savedir='cw/', focals=[]):
 
         res[i][idx == 0] = [0, 0, 0]
         
-        cv2.imwrite(savedir + 'warp{}.png'.format(i), res[i])
+        if save_cw: cv2.imwrite(savedir + 'warp{}.png'.format(i), res[i])
         print('\rcylinder warping %d' % (i), end=' ')
     
     print()    
     return res.astype(np.uint8)
 
 
-#
-#   Harris Corner Detector
-#
+##############################
+#                            #
+#   Harris Corner Detector   #
+#                            #
+##############################
 
 def calculate_R(gray, ksize=9, S=3, k=0.04):
     K = (ksize, ksize)
@@ -106,7 +111,7 @@ def calculate_R(gray, ksize=9, S=3, k=0.04):
     print('R:', np.min(R), np.max(R))
     return R, Ix, Iy, Ix2, Iy2
 
-def find_local_max_R(R, rthres=0.1):
+def find_local_max_R(R, rthres=0.5):
     kernels = []
     for y in range(3):
         for x in range(3):
@@ -130,10 +135,12 @@ def find_local_max_R(R, rthres=0.1):
     return feature_points[1], feature_points[0]
 
 
-#
-#   Image Descriptors
-#
-    
+#########################
+#                       #
+#   Image Descriptors   #
+#                       #
+#########################
+
 def get_orientations(Ix, Iy, Ix2, Iy2, bins=8):
     M = (Ix2 + Iy2) ** (1/2)
 
@@ -153,7 +160,6 @@ def get_orientations(Ix, Iy, Ix2, Iy2, bins=8):
     ori = np.argmax(ori_1hot, axis=0)
     
     return ori, ori_1hot, theta, theta_bins, M
-
 
 def get_descriptors(fpx, fpy, ori, theta):
     
@@ -194,9 +200,11 @@ def get_descriptors(fpx, fpy, ori, theta):
     return descriptors
 
 
-#
-#   Feature Matching
-#
+########################
+#                      #
+#   Feature Matching   #
+#                      #
+########################
 
 def find_matches(des1, des2, thres=0.8):
     df1 = pd.DataFrame(des1)
@@ -216,11 +224,13 @@ def find_matches(des1, des2, thres=0.8):
     
     print('found matches:', len(matches))
     return matches
-    
 
-#
-#   RANSAC Algorithm
-#
+
+########################
+#                      #
+#   RANSAC Algorithm   #
+#                      #
+########################
 
 def ransac(matches, des1, des2, n=4):
     matches = np.array(matches)
@@ -237,166 +247,148 @@ def ransac(matches, des1, des2, n=4):
         dxy = np.mean(P1[samples] - P2[samples], axis=0).astype(np.int)
         diff_xy = np.abs(P1 - (P2 + dxy))
         err = np.sum( np.sign(np.sum(diff_xy, axis=1)) )
-        E.append(err); Dxy.append(dxy)
+        E += [err]; Dxy += [dxy]
 
     Ei = np.argsort(E)
-    best_dxy = Dxy[Ei[0]]
+    best_dxy = np.round(Dxy[Ei[0]]).astype(int)
     
-    print('ransac, best dxy: {}, error: {:.4f}'.format(best_dxy, E[Ei[0]]))
+    print('ransac, best dxy: {}, error: {}'.format(best_dxy, E[Ei[0]]))
     return best_dxy
 
 
-def get_amap(size1, size2, dxy):
-    (h1, w1), (h2, w2), (dx, dy) = size1, size2, dxy
-    
-    sx = dx if dx > 0 else w2
-    sy = dy if dy > 0 else h2
-    ex = w1 if dx > 0 else -dx
-    ey = h1 if dy > 0 else -dy
-    nx, ny = abs(sx - ex), abs(sy - ey)
-    
-    xlin = np.linspace(1, 0, nx) if dx > 0 else np.linspace(0, 1, nx)
-    ylin = np.linspace(1, 0, ny) if dy > 0 else np.linspace(0, 1, ny)
-    xv, yv = np.meshgrid(xlin, ylin)
-    
-    #bw = (xv + yv) / 2
-    bw = xv
-    bw = np.stack([bw, bw, bw], axis=2)
-    
-    if sx > ex: sx, ex = ex, sx
-    if sy > ey: sy, ey = ey, sy
-    
-    return (bw, 1 - bw), (sx, sy), (ex, ey)
+##############################
+#                            #
+#   Image Blending: Linear   #
+#                            #
+##############################
 
-def init_blend(h, w, c):
-    m = np.zeros((h, w, c), dtype=np.float32)
-    mw = np.ones((h, w, c), dtype=np.float32)
-    return m, np.copy(m), mw, np.copy(mw)
+def init_panorama(Dxy_sum, im_shape):
+    print('init panorama.')
+    Dx, Dy = Dxy_sum[:, 0], Dxy_sum[:, 1]
+    dx_max, dx_min = np.max(Dx), np.min(Dx)
+    dy_max, dy_min = np.max(Dy), np.min(Dy)
+    
+    ox = -dx_min if dx_min < 0 else 0
+    oy = -dy_min if dy_min < 0 else 0
+    
+    h, w, c = im_shape
+    W = (ox + dx_max + w) if dx_max > 0 else w + ox 
+    H = (oy + dy_max + h) if dy_max > 0 else h + oy
+    
+    pano = np.zeros((H, W, c)).astype(np.float32)
+    
+    return pano, ox, oy
 
-def blend(im1, im2, dxy, dwh):
-    h1, w1, c = im1.shape
-    h2, w2, c = im2.shape
-    (a1, a2), (sx, sy), (ex, ey) = get_amap((h1, w1), (h2, w2), dxy)
-    (dx, dy) = dxy
+def find_union_inter(pano, im, x, y, w, h):
+    map_pano = np.sign(pano)
     
-    w, h = w1 + abs(dwh[0]), h1 + abs(dwh[1])
-    m1, m2, mw1, mw2 = init_blend(h, w, c)
+    map_add = np.zeros(pano.shape)
+    map_add[y:y+h, x:x+w][im > 0] = 1
     
-    x1, y1 = -min(0, dx), -min(0, dy)
-    x2, y2 = max(0, dx), max(0, dy)
+    union = np.sign(map_pano + map_add)
+    inter = map_add + map_pano - union
     
-    #print('im1:', im1.shape)
-    #print('im2:', im2.shape)
-    #print('dxy:', dxy)
-    #print('dwh:', dwh)
-    #print('h, w:', h, w)
-    #print('x1, y1:', x1, y1)
-    #print('x2, y2:', x2, y2)
-    
-    m1[y1:y1+h1, x1:x1+w1] += im1
-    m2[y2:y2+h2, x2:x2+w2] += im2
+    return union, inter, map_pano, map_add
 
-    mw1[sy:ey, sx:ex] *= a1
-    mw1[m2 == 0] = 1
-    mw1[m1 == 0] = 0
+def find_range(array):
+    sum_x = np.sum(array, axis=0)
+    sum_y = np.sum(array, axis=1)
     
-    mw2[sy:ey, sx:ex] *= a2
-    mw2[m1 == 0] = 1
-    mw2[m2 == 0] = 0    
+    index_x = np.where(sum_x > 0)[0]
+    sx = index_x[0]
+    ex = index_x[-1] + 1 # slicing
+    index_y = np.where(sum_y > 0)[0]
+    sy = index_y[0]
+    ey = index_y[-1] + 1 # slicing
     
-    merged = mw1 * m1 + mw2 * m2
-    
-    print('blend:', merged.shape)
-    return merged.astype(np.uint8)
+    return sx, ex, sy, ey
 
+def find_amap(inter, signx):
+    sx, ex, sy, ey = find_range(inter)
+    
+    xlen, ylen = ex-sx, ey-sy
+    amap = np.zeros((ylen, xlen))
+    amap += np.linspace(0, 1, xlen) if signx >= 0 else np.linspace(1, 0, xlen)
+    amap = np.stack([amap, amap, amap], axis=2)
+    
+    return amap, sx, ex, sy, ey
 
-#
-#   RANSAC Algorithn with Rotations
-#
-
-def ransac_with_rotation(matches, des1, des2, rgb1, rgb2):
-    
-    def get_angle(dx, dy):
-        angle = np.arctan(dy / (dx + 1e-8)) * (180 / np.pi)
-        if dx < 0: angle += 180
-        angle = (angle + 360) % 360
-        return angle
-    
-    matches = np.array(matches)
-    m1, m2 = matches[:, 0], matches[:, 1]
-    
-    df1, df2 = pd.DataFrame(des1), pd.DataFrame(des2)
-    X1, Y1 = np.array(df1.loc[m1]['x']), np.array(df1.loc[m1]['y'])
-    X2, Y2 = np.array(df2.loc[m2]['x']), np.array(df2.loc[m2]['y'])
-    
-    P1 = np.array([X1, Y1]).T.reshape(1, -1, 2)
-    P2 = np.array([X2, Y2]).T.reshape(1, -1, 2)
-    
-    E, content = [], []
-
-    for i in range(1000):
-        sampled_matches = np.random.randint(0, len(matches), 2)
-
-        m1, m2 = sampled_matches
+def _blend_linear(pano, im, x, y, signx):
+    h, w, c = im.shape
+    if np.sum(pano) == 0:
+        pano[y:y+h, x:x+w] = im.astype(np.float32)
+    else:
+        # find intersection, union (OK)
+        union, inter, w_pano, w_add = find_union_inter(pano, im, x, y, w, h)
         
-        m1_x1, m1_y1, m1_x2, m1_y2 = X1[m1], Y1[m1], X2[m1], Y2[m1]
-        m2_x1, m2_y1, m2_x2, m2_y2 = X1[m2], Y1[m2], X2[m2], Y2[m2]
+        # find intersection amap array with linear weights
+        amap, sx, ex, sy, ey = find_amap(inter, signx)
         
-        dx1, dy1 = m2_x1 - m1_x1, m2_y1 - m1_y1
-        dx2, dy2 = m2_x2 - m1_x2, m2_y2 - m1_y2
+        # construct added image
+        add = np.zeros(pano.shape).astype(np.float32)
+        add[y:y+h, x:x+w] = im.astype(np.float32)
         
-        a1 = get_angle(dx1, dy1)
-        a2 = get_angle(dx2, dy2)
+        # get weights, blend
+        w_pano[sy:ey, sx:ex] *= (1. - amap)
+        w_pano[add == 0] = 1
+        w_pano[pano == 0] = 0
+        w_add[sy:ey, sx:ex] *= amap
+        w_add[pano == 0] = 1
+        w_add[add == 0] = 0
         
-        da = a1 - a2 # im2 rotate to im1
-        R = cv2.getRotationMatrix2D((m1_x2, m1_y2), -da, 1) # cv2 rotate is counter-clockwise, y down +
+        # blend
+        pano = w_pano * pano + w_add * add
         
-        P2_r = cv2.transform(P2, R)
-        
-        dx, dy = m1_x1 - m1_x2, m1_y1 - m1_y2
-        P2_r[:, :, 0] += dx
-        P2_r[:, :, 1] += dy
-        
-        e = np.abs(P2_r - P1)
-        e = np.sum(np.sign(e[e > 1]))
-        E.append(e)
-        content.append([dx, dy, -da, m1_x2, m1_y2])
-        
-    E = np.array(E)
-    Ei = np.argsort(E)
-    bm = Ei[:5]
+    return pano
+
+def blend_linear(images, Dxy):
+    h, w, c = images[0].shape
+    Dxy_sum = [np.zeros(2).astype(int)]
+    for dxy in Dxy:
+        Dxy_sum.append(Dxy_sum[-1] + dxy)
     
-    print('Best matches:', bm, '\nError:', E[bm])
-    return np.mean(np.array(content)[bm], axis=0)
+    Dxy_sum = np.array(Dxy_sum)
+    pano, ox, oy = init_panorama(Dxy_sum, (h, w, c))
+    Dxy = [np.zeros(2)] + Dxy # dx sign
+    
+    for i, (im, dxy_sum, dxy) in enumerate(zip(images, Dxy_sum, Dxy)):
+        dx_sum, dy_sum = dxy_sum
+        x, y = ox + dx_sum, oy + dy_sum
+        print(i, 'x = %4d, y = %4d' % (x, y))
+        pano = _blend_linear(pano, im, x, y, dxy[0])
+        
+    return pano.astype(np.uint8)
 
 
-def blend_with_rotation(im1, im2, dxy, da, p2): 
-    (dx, dy), (x2, y2) = int(dxy), int(p2)
-    
-    h1, w1, c = im1.shape
-    h2, w2, c = im2.shape    
-    (a1, a2), (sx, sy), (ex, ey) = get_amap((h1, w1), (h2, w2), (dx, dy))
-    
-    h, w = h1 + abs(dy), w1 + abs(dx)
-    m1, m2, mw1, mw2 = init_blend(h, w, c)
-    
-    # rotate im2
-    R = cv2.getRotationMatrix2D((x2, y2), da, 1)
-    im2 = cv2.warpAffine(im2, R, (w2, h2))
-    
-    x1, y1 = -min(0, dx), -min(0, dy)
-    x2, y2 = max(0, dx), max(0, dy)
-    
-    m1[y1:y1+h1, x1:x1+w1] += im1
-    m2[y2:y2+h2, x2:x2+w2] += im2
+#########################
+#                       #
+#   Bundle Adjustment   #
+#                       #
+#########################
 
-    mw1[sy:ey, sx:ex] *= a1
-    mw1[m2 == 0] = 1
-    mw1[m1 == 0] = 0
-    mw2[sy:ey, sx:ex] *= a2
-    mw2[m1 == 0] = 1
-    mw2[m2 == 0] = 0    
+def bundle_adjust(pano):
+    print('find corners:')
+    pano_gray = cv2.cvtColor(pano, cv2.COLOR_RGB2GRAY)
+    h, w = pano_gray.shape
+    sx, ex, sy, ey = find_range(pano_gray)
     
-    merged = mw1 * m1 + mw2 * m2
+    lc = pano_gray[:, sx] # left column
+    ly = np.where(lc > 0)[0]
+    upper_left = [sx, ly[0]]
+    bottom_left = [sx, ly[-1]]
     
-    return merged.astype(np.uint8)
+    ex -= 1
+    rc = pano_gray[:, ex] # right column
+    ry = np.where(rc > 0)[0]
+    upper_right = [ex, ry[0]]
+    bottom_right = [ex, ry[-1]]
+    
+    corner1 = np.float32([upper_left, upper_right, bottom_left, bottom_right])
+    corner2 = np.float32([[0, 0], [w, 0], [0, h], [w, h]])
+    print('corner1:\n', corner1, '\ncorner2:\n', corner2)
+    
+    print('warp perspective.')
+    M = cv2.getPerspectiveTransform(corner1, corner2)
+    pano_adjust = cv2.warpPerspective(pano, M, (w, h))
+    
+    return pano_adjust

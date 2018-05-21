@@ -1,7 +1,8 @@
 #
 #   Image Stitching: Visualize
 #   Written by Qhan
-#   2018.5.20
+#   First Version: 2018.5.20
+#   Last Update: 2018.5.22
 #
 
 import numpy as np
@@ -9,9 +10,11 @@ import cv2
 import matplotlib.pyplot as plt
 
 
-#
-#   Harris Corner Detector
-#
+#########################################
+#                                       #
+#   Visualize: Harris Corner Detector   #
+#                                       #
+#########################################
 
 def plot_features(im, R, fpx, fpy, Ix, Iy, arrow_size=1.0):
     h, w, c = im.shape
@@ -35,9 +38,11 @@ def plot_features(im, R, fpx, fpy, Ix, Iy, arrow_size=1.0):
     plt.show()
 
 
-#
-#   Orientations, Local Image Descriptors
-#   
+########################################################
+#                                                      #
+#   Visualize: Orientations, Local Image Descriptors   #
+#                                                      #
+########################################################
 
 def plot_orientations(magnitude, theta, theta_bins, orientations, bins=8):
     fig, ax = plt.subplots(2, 2, figsize=(10, 10))
@@ -48,10 +53,12 @@ def plot_orientations(magnitude, theta, theta_bins, orientations, bins=8):
     plt.savefig('orientations.png')
     plt.show()
     
-    
-#
-#   Feature Matching
-#
+
+###################################
+#                                 #
+#   Visualize: Feature Matching   #
+#                                 #
+###################################
 
 def plot_matches(im1, im2, des1, des2, matches):
     vis = np.zeros([max(h1, h2), w1 + w2, 3], dtype=np.uint8) + 255
