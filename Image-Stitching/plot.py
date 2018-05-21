@@ -5,9 +5,9 @@
 #   Last Update: 2018.5.22
 #
 
-import numpy as np
 import cv2
 import matplotlib.pyplot as plt
+import numpy as np
 
 
 #########################################
@@ -72,5 +72,6 @@ def plot_matches(im1, im2, des1, des2, matches):
         x1, y1 = des1[m1]['x'], des1[m1]['y']
         x2, y2 = des2[m2]['x'], des2[m2]['y']
         ax.plot([x1, w1 + x2], [y1, y2], marker='o', linewidth=1, markersize=4)
-
+    
+    plt.savefig('matches.png')
     plt.show()

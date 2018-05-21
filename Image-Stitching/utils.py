@@ -83,11 +83,11 @@ def cylinder_warping(images, focals=[], save_cw=False, savedir='cw/'):
     return res.astype(np.uint8)
 
 
-##############################
-#                            #
-#   Harris Corner Detector   #
-#                            #
-##############################
+#################################################
+#                                               #
+#   Feature Detection: Harris Corner Detector   #
+#                                               #
+#################################################
 
 def calculate_R(gray, ksize=9, S=3, k=0.04):
     K = (ksize, ksize)
@@ -135,13 +135,13 @@ def find_local_max_R(R, rthres=0.5):
     return feature_points[1], feature_points[0]
 
 
-#########################
-#                       #
-#   Image Descriptors   #
-#                       #
-#########################
+###########################
+#                         #
+#   Feature Descriptors   #
+#                         #
+###########################
 
-def get_orientations(Ix, Iy, Ix2, Iy2, bins=8):
+def get_orientations(Ix, Iy, Ix2, Iy2, bins=8, ksize=9):
     M = (Ix2 + Iy2) ** (1/2)
 
     theta = np.arctan(Iy / (Ix + 1e-8)) * (180 / np.pi)
@@ -155,7 +155,7 @@ def get_orientations(Ix, Iy, Ix2, Iy2, bins=8):
     for b in range(bins):
         ori_1hot[b][theta_bins == b] = 1
         ori_1hot[b] *= M
-        ori_1hot[b] = cv2.GaussianBlur(ori_1hot[b], (9, 9), 0)
+        ori_1hot[b] = cv2.GaussianBlur(ori_1hot[b], (ksize, ksize), 0)
 
     ori = np.argmax(ori_1hot, axis=0)
     
@@ -226,13 +226,13 @@ def find_matches(des1, des2, thres=0.8):
     return matches
 
 
-########################
-#                      #
-#   RANSAC Algorithm   #
-#                      #
-########################
+########################################
+#                                      #
+#   Image Matching: RANSAC Algorithm   #
+#                                      #
+########################################
 
-def ransac(matches, des1, des2, n=4):
+def ransac(matches, des1, des2, n=4, K=1000):
     matches = np.array(matches)
     m1, m2 = matches[:, 0], matches[:, 1]
     
@@ -242,7 +242,7 @@ def ransac(matches, des1, des2, n=4):
     P2 = np.array(df2.loc[m2][['x', 'y']])
 
     E, Dxy = [], []
-    for k in range(1000):
+    for k in range(K):
         samples = np.random.randint(0, len(P1), n)
         dxy = np.mean(P1[samples] - P2[samples], axis=0).astype(np.int)
         diff_xy = np.abs(P1 - (P2 + dxy))

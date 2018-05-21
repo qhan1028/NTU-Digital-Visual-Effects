@@ -110,6 +110,29 @@ def ransac_with_rotation(matches, des1, des2, rgb1, rgb2):
     return np.mean(np.array(content)[bm], axis=0)
 
 
+def get_amap(size1, size2, dxy):
+    (h1, w1), (h2, w2), (dx, dy) = size1, size2, dxy
+    
+    sx = dx if dx > 0 else w2
+    sy = dy if dy > 0 else h2
+    ex = w1 if dx > 0 else -dx
+    ey = h1 if dy > 0 else -dy
+    nx, ny = abs(sx - ex), abs(sy - ey)
+    
+    xlin = np.linspace(1, 0, nx) if dx > 0 else np.linspace(0, 1, nx)
+    ylin = np.linspace(1, 0, ny) if dy > 0 else np.linspace(0, 1, ny)
+    xv, yv = np.meshgrid(xlin, ylin)
+    
+    #bw = (xv + yv) / 2
+    bw = xv
+    bw = np.stack([bw, bw, bw], axis=2)
+    
+    if sx > ex: sx, ex = ex, sx
+    if sy > ey: sy, ey = ey, sy
+    
+    return (bw, 1 - bw), (sx, sy), (ex, ey)
+
+
 def blend_with_rotation(im1, im2, dxy, da, p2): 
     (dx, dy), (x2, y2) = int(dxy), int(p2)
     
@@ -140,4 +163,3 @@ def blend_with_rotation(im1, im2, dxy, da, p2):
     merged = mw1 * m1 + mw2 * m2
     
     return merged.astype(np.uint8)
-
