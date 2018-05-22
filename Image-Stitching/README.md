@@ -15,9 +15,9 @@
 
 * macOS Sierra 10.12.6
 * Python ~= 3.6.2
-  * python-opencv ~= 3.3.0.10
   * matplotlib ~= 2.0.2
   * numpy >= 1.13.1
+  * opencv-python ~= 3.3.0.10
   * pandas ~= 0.21.1
   * scipy >= 0.19.1
 
