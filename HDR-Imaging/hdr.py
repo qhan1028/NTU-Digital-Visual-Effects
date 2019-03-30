@@ -4,187 +4,237 @@
 #   2018.4.11
 #
 
+from argparse import ArgumentParser
 import cv2
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
 from mpl_toolkits.axes_grid1 import make_axes_locatable
-import os.path as osp
 import os
-from argparse import ArgumentParser
+import os.path as osp
+import random
 
-from utils import ImageAlignment, DebevecMethod, ToneMapping
+from utils import Weights, ImageAlignment, DebevecMethod, RobertsonMethod, ToneMapping
 from timer import Timer
 
 
+parser = ArgumentParser('High Dynamic Range Imaging')
+parser.add_argument('input_dir', default='cksmh', nargs='?', help='input directory of images with different shutter times.')
+
 t = Timer()
 
-class HDR(ImageAlignment, DebevecMethod, ToneMapping):
+class HDR(Weights):
     
-    def __init__(self, savedir='res'):
-        self.bgr_string = ['blue', 'green', 'red']
-        self.weight_type = 2
-        self.savedir = savedir
-        if not osp.exists(savedir): os.mkdir(savedir)
-        print('[Init] savedir:', savedir)
-        
+    def __init__(self):
+        self.image_alignment = ImageAlignment()
+        self.debevec_method = DebevecMethod()
+        self.Robertson_method = RobertsonMethod()
+        self.tone_mapping = ToneMapping()
+        self.colors = ['blue', 'green', 'red']
+
+    def check_path(self, indir, savedir):
+        if not osp.exists(indir) or not osp.isdir(indir):
+            print('[Process] input directory not exists.')
+            return False
+
+        if not osp.exists(savedir):
+            os.mkdir(savedir)
+
+        return True
+
     def read_images(self, dirname):
         def is_image(filename):
             name, ext = osp.splitext(osp.basename(filename))
-            return ext in ['.jpg', '.png']
+            return ext in ['.jpg', '.png', '.gif']
         
-        self.images = []
-        self.images_rgb = []
+        images = []
 
-        for filename in os.listdir(dirname):
+        for filename in np.sort(os.listdir(dirname)):
             if is_image(filename):
-                self.images += [cv2.imread(dirname + '/' + filename)]
-                self.images_rgb += [cv2.cvtColor(self.images[-1], cv2.COLOR_BGR2RGB)]
+                images += [cv2.imread(dirname + '/' + filename)]
 
-        self.height, self.width, self.channel = self.images[0].shape
-        print('[Read] image shape:', self.images[0].shape)
-        
-        self.P = len(self.images)
-        print('[Read] # images:', self.P)
+        print('[Read] image shape:', images[0].shape)
+        print('[Read] images: P =', len(images))
 
-    def display_inputs(self):
-        b = np.ceil((np.sqrt(self.P))).astype(int)
-        fig, axes = plt.subplots(b, b, figsize=(4 * b, 4 * b))
+        return images
         
-        for p in range(self.P): 
-            axes[int(p / b), int(p % b)].imshow(self.images_rgb[p])
-            
-        fig.savefig(self.savedir + '/input_images.png', bbox_inches='tight', dpi=256)
-        
-    def read_shutter_times(self, dirname):        
-        with open(dirname + '/shutter_times.txt', 'r') as f:
-            shutter_times = []
-            st_string = []
+    def read_shutter_times(self, dirname):
+        shutter_times, shutter_times_string = [], []
+
+        with open(osp.join(dirname, 'shutter_times.txt'), 'r') as f:
             
             for line in f.readlines():
                 line = line.replace('\n', '')
-                st_string += [line]
+                shutter_times_string += [line]
                 
                 if '/' in line:
                     a, b = np.float32(line.split('/'))
                     shutter_times += [a/b]
+                    
                 else:
                     shutter_times += [np.float32(line)]
         
-        self.shutter_times = np.array(shutter_times, dtype=np.float32)
-        self.log_st = np.log(shutter_times, dtype=np.float32)
-        self.st_string = st_string
+        print('[Read] shutter times:', shutter_times_string)
+        return np.array(shutter_times, dtype=np.float32), shutter_times_string
         
-    def sample_points(self, w_points, h_points):
-        xp = np.random.randint(0, self.width, w_points)
-        yp = np.random.randint(0, self.height, h_points)
+    def sample_points(self, images, n_samples=150, random_seed=1208):
+        print('[Sample] samples per image: N =', n_samples)
 
-        self.N = len(xp) * len(yp) # number of selected pixels
-        print('[Sample Points] # samples per image:', self.N)
+        height, width, channels = images[0].shape
 
-        xv, yv = np.meshgrid(xp, yp)
-        self.Z_bgr = [[self.images[p][yv, xv, c] for p in range(self.P)] for c in range(3)]
+        random.seed(random_seed)
+        indices = np.array(random.sample(range(height * width), n_samples))
+
+        xv = indices % width
+        yv = indices // width
+
+        return [[images[p][yv, xv, c] for p in range(len(images))] for c in range(channels)]
+    
+    def solve_hdr(self, images, hdr_method, ln_st, n_samples, n_epochs, wtype):
+        if hdr_method == 'debevec':
+            samples_bgr = self.sample_points(images, n_samples)
+            return [self.debevec_method.solve(sample, ln_st, n_samples, n_images, wtype) for sample in samples_bgr]
         
-    def compute_radiance(self, images=None, LnG_bgr=None, log_st=None):
-        if images is None: images = self.images
-        if LnG_bgr is None: LnG_bgr = self.LnG_bgr
-        if log_st is None: log_st = self.log_st
-            
-        def fmt(x, pos): return '%.3f' % np.exp(x)
+        elif hdr_method == 'robertson':
+            h, w, channels = images[0].shape
+            all_bgr = [[images[p][:, :, c] for p in range(n_images)] for c in range(channels)]
+            init_G = [np.exp(np.arange(0, 1, 1 / 256))] * channels
+            return [self.robertson_method.solve(Z, init_G, n_epochs) for Z in all_bgr]
         
-        h, w = self.height, self.width
-        log_radiance_bgr = np.zeros([h, w, self.channel]).astype(np.float32)
+        else:
+            print('[HDR] unknown hdr method:', hdr_method)
+            return None
 
-        plt.clf()
-        fig, axes = plt.subplots(1, 3, figsize=(15, 5))
+    def solve_tm(self, radiance_bgr, tm_method, savedir):
+        if tm_method == 'photographic_global':
+            ldr = self.tone_mapping.photographic_global(radiance_bgr)
+            filepath = osp.join(savedir, "tonemap_photographic_global.png")
+        
+        elif tm_method == 'photographic_local':
+            ldr = self.tone_mapping.photographic_local(radiance_bgr)
+            filepath = osp.join(savedir, "tonemap_photographic_local.png")
+        
+        elif tm_method == 'bilateral':
+            ldr = self.tone_mapping.bilateral_filtering(radiance_bgr)
+            filepath = osp.join(savedir, "tonemap_bilateral.png")
 
-        for c in range(3): # BGR channels
+        else:
+            print('[Tone Mapping] unknown tone mapping method:', tm_method)
+            return None
 
-            W_sum = np.zeros([h, w], dtype=np.float32) + 1e-8
-            log_radiance_sum = np.zeros([h, w], dtype=np.float32)
+        cv2.imwrite(filepath, ldr)
+        return ldr
 
-            for p in range(self.P): # different shutter times
+    def compute_radiance(self, images, lnG_bgr, ln_st, wtype, savedir):
+        P = len(images)
+        image_shape = images[0].shape
+        ln_radiance_bgr = np.zeros(image_shape).astype(np.float32)
+        height, width, channels = image_shape
 
-                print('\r[Radiance] color: ' + self.bgr_string[c] + ', st: ' + self.st_string[p], end='     ')
+        for c in range(channels): # BGR channels
+            W_sum = np.zeros([height, width], dtype=np.float32) + 1e-8
+            ln_radiance_sum = np.zeros([height, width], dtype=np.float32)
 
+            for p in range(P): # different shutter times
                 im_1D = images[p][:, :, c].flatten()
-                log_radiance = (LnG_bgr[c][im_1D] - log_st[p]).reshape(h, w)
+                ln_radiance = (lnG_bgr[c][im_1D] - ln_st[p]).reshape(height, width)
 
-                weights = self.get_weights(im_1D, wtype=self.weight_type, p=p).reshape(h, w)
-                w_log_radiance = log_radiance * weights
-                log_radiance_sum += w_log_radiance
+                weights = self.get_weights(im_1D, wtype).reshape(height, width)
+                w_ln_radiance = ln_radiance * weights
+                ln_radiance_sum += w_ln_radiance
                 W_sum += weights
 
-            weighted_log_radiance = log_radiance_sum / W_sum
-            log_radiance_bgr[:, :, c] = weighted_log_radiance
+            weighted_ln_radiance = ln_radiance_sum / W_sum
+            ln_radiance_bgr[:, :, c] = weighted_ln_radiance
+        
+        radiance_bgr = np.exp(ln_radiance_bgr).astype(np.float32)
+        cv2.imwrite(osp.join(savedir, 'radiance.hdr'), radiance_bgr)
 
-            ax = axes[c]
-            im = ax.imshow(weighted_log_radiance, cmap='jet')
-            ax.set_title(self.bgr_string[c])
-            ax.set_axis_off()
-            divider = make_axes_locatable(ax)
+        print('[Radiance]', radiance_bgr.shape)
+        
+        return radiance_bgr
+
+    def plot_images(self, images, shutter_times_string, savedir):
+        print('[Plot] input')
+        P = len(images)
+        b = np.ceil((np.sqrt(P))).astype(int)
+        fig, ax = plt.subplots(b, b, figsize=(4 * b, 4 * b))
+        
+        for p in range(P): 
+            ax[int(p / b), int(p % b)].imshow(cv2.cvtColor(images[p], cv2.COLOR_BGR2RGB))
+            ax[int(p / b), int(p % b)].set_title(shutter_times_string[p])
+            
+        fig.savefig(osp.join(savedir, 'input_images.png'), bbox_inches='tight', dpi=256)
+    
+    def plot_response_curve(self, lnG_bgr, savedir):
+        print('[Plot] response curve')
+        channels = len(lnG_bgr)
+        fig, ax = plt.subplots(1, channels, figsize=(5 * channels, 5))
+        
+        for c in range(channels):
+            ax[c].plot(lnG_bgr[c], np.arange(256), c=self.colors[c])
+            ax[c].set_title(self.colors[c])
+            ax[c].set_xlabel('E: Log Exposure')
+            ax[c].set_ylabel('Z: Pixel Value')
+            ax[c].grid(linestyle=':', linewidth=1)
+            
+        fig.savefig(osp.join(savedir, 'response_curve.png'), bbox_inches='tight', dpi=256)
+
+    def plot_radiance(self, radiance, savedir):
+        print('[Plot] radiance')
+        def fmt(x, pos): return '%.3f' % np.exp(x)
+
+        height, width, channels = radiance.shape
+        ln_radiance = np.log(radiance)
+
+        plt.clf()
+        fig, ax = plt.subplots(1, channels, figsize=(5 * channels, 5))
+
+        for c in range(channels):
+            im = ax[c].imshow(ln_radiance[:, :, c], cmap='jet')
+            ax[c].set_title(self.colors[c])
+            ax[c].set_axis_off()
+            divider = make_axes_locatable(ax[c])
             cax = divider.append_axes("right", size="5%", pad=0.05)
             fig.colorbar(im, cax=cax, format=ticker.FuncFormatter(fmt))
-        print()
+
+        fig.savefig(osp.join(savedir, 'radiance.png'), bbox_inches='tight', dpi=256)
         
-        fig.savefig(self.savedir + '/radiance_debevec.png', bbox_inches='tight', dpi=256)
+    def solve(self, indir, savedir, hdr_method='debevec', tm_method='photographic_local', n_samples=150, n_epochs=5, wtype='triangle'):
+        if not self.check_path(indir, savedir):
+            return None
+
+        # read images
+        images = self.read_images(indir)
+        n_images = len(images)
+
+        # read shutter times
+        st, st_str = self.read_shutter_times(indir)
+        ln_st = np.log(st)
         
-        self.log_radiance_bgr = log_radiance_bgr
-        self.radiance_bgr = np.exp(log_radiance_bgr)
-        cv2.imwrite(self.savedir + '/radiance_debevec.hdr', self.radiance_bgr)
+        # solve HDR, obtain response curve
+        lnG_bgr = self.solve_hdr(images, hdr_method, ln_st, n_samples, n_epochs, wtype)
         
-        return self.radiance_bgr
-    
-    def response_curve(self, LnG_bgr=None):
-        if LnG_bgr is None: LnG_bgr = self.LnG_bgr
+        # reconstruct radiance
+        radiance_bgr = self.compute_radiance(images, lnG_bgr, ln_st, wtype, savedir)
         
-        fig, axes = plt.subplots(1, 3, figsize=(15, 5))
+        # convert HDR to LDR by tonemapping
+        ldr = self.solve_tm(radiance_bgr, tm_method, savedir)
         
-        for c in range(3):
-            ax = axes[c]
-            ax.plot(LnG_bgr[c], np.arange(256), c=self.bgr_string[c])
-            ax.set_title(self.bgr_string[c])
-            ax.set_xlabel('[Response Curve] E: Log Exposure')
-            ax.set_ylabel('[Response Curve] Z: Pixel Value')
-            ax.grid(linestyle=':', linewidth=1)
-            
-        fig.savefig(self.savedir + '/response_curve.png', bbox_inches='tight', dpi=256)
+        # plot result
+        self.plot_images(images, st_str, savedir)
+        self.plot_response_curve(lnG_bgr, savedir)
+        self.plot_radiance(radiance_bgr, savedir)
         
-    def solve_bgr(self):
-        # self.solve() is inherited from DebevecMethod class
-        self.LnG_bgr = [self.solve(Z, self.log_st, self.N, self.P) for Z in self.Z_bgr]
-        
-    def process(self, indir):        
-        self.read_images(indir)
-        self.display_inputs()
-        self.read_shutter_times(indir)
-        self.sample_points(10, 10)
-        
-        self.solve_bgr()
-        self.compute_radiance()
-        self.response_curve()
-        
-        ldr1 = self.photographic_global(self.radiance_bgr) # inherited from ToneMapping class
-        cv2.imwrite(self.savedir + "/result_photographic_global.jpg", ldr1)
-        
-        ldr2 = self.photographic_local(self.radiance_bgr) # inherited from ToneMapping class
-        cv2.imwrite(self.savedir + "/result_photographic_local.jpg", ldr2)
-        
-        ldr3 = self.bilateral_filtering(self.radiance_bgr) # inherited from ToneMapping class
-        cv2.imwrite(self.savedir + "/result_bilateral_filtering.jpg", ldr3)
-        
-        return ldr2
+        return lnG_bgr, radiance_bgr, ldr
 
 
 if __name__ == '__main__':
-    parser = ArgumentParser('High Dynamic Range Imaging')
-    parser.add_argument('input_dir', default='cksmh', nargs='?', 
-                        help='input directory of images with different shutter times.')
     args = vars(parser.parse_args())
     
     # Example Usage
     indir = args['input_dir']
-    savedir = indir + '_res'
+    savedir = osp.join(indir, 'res')
     
-    hdr = HDR(savedir=savedir)
-    res = hdr.process(indir)
+    hdr = HDR()
+    lnG, radiance, ldr = hdr.solve(indir, savedir)

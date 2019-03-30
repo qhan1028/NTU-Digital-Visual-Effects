@@ -2,29 +2,25 @@
 #   HDR Utilities
 #   Written by Qhan
 #   2018.4.11
+#   2019.3.29
 #
 
-import numpy as np
 import cv2
+import numpy as np
 
 
 gaussian = lambda x, mu, s: 1 / (s * (2 * np.pi) ** (1/2)) * np.exp(-(x - mu) ** 2 / (2 * s ** 2))
-    
+
 class Weights():
     
-    def get_weights(self, Z, wtype=0, p=0, mean=128, sigma=128):
-        if wtype == 1:
-            zmax = np.max(Z).astype(np.float32)
-            zmin = np.min(Z).astype(np.float32)
-            zmid = np.ceil(np.mean(Z)).astype(int)
-            weights = np.arange(256, dtype=np.float32)
-            weights[:zmid] = weights[:zmid] - zmin
-            weights[zmid:] = zmax - weights[zmid:]
-            return weights[Z] / zmid.astype(np.float32)
+    def get_weights(self, Z, wtype='triangle', mean=128, sigma=128):
+        if wtype == 'triangle':
+            weights = np.concatenate((np.arange(1, 129), np.arange(1, 129)[::-1]), axis=0)
+            return weights[Z].astype(np.float32)
 
-        elif wtype == 2:
+        elif wtype == 'gaussian':
             w = np.arange(256)
-            return gaussian(w, mean, sigma)[Z]
+            return gaussian(w, mean, sigma)[Z].astype(np.float32) * 128
 
         else:
             return np.ones(Z.shape, dtype=np.float32)
@@ -33,7 +29,6 @@ class Weights():
 #
 #   Image Alignment (Pyramid Method)
 #
-
 class ImageAlignment():
     
     def __init__(self, threshold=4):
@@ -79,90 +74,131 @@ class ImageAlignment():
 
         return dx, dy
 
-    
+
 #
 #   Paul Debevec's Method for HDR Imaging
 #
-
 class DebevecMethod(Weights):
     
-    def __init__(self, wtype=2):
-        self.weight_type = wtype
+    def __init__(self, wtype='triangle'):
+        self.wtype = wtype
     
-    def constructA(self, cols, rows, W, Ln_st, N, P, constraint, lamda):
-        A = np.zeros([N * P + 255, 256 + N], dtype=np.float32)
-
+    def construct_A(self, cols, rows, W, ln_st, N, P, constraint, lamda):
+        A = np.zeros([N * P + 255, 256 + N])
+    
         A[cols, rows] = W
 
         for p in range(P):
             A[p * N : p * N + N, 256:] = -np.identity(N) * W[p * N : p * N + N]
 
         for i in range(254):
-            A[N * P + i, i : i + 3] = np.array([1, -2, 1]) * lamda
+            A[N * P + i, i : i + 3] = np.array([1, -2, 1]) * np.abs(i - 127) * lamda
 
         A[-1, constraint] = 1
 
-        return A
+        return A.astype(np.float32)
 
-    def constructB(self, cols, rows, W, Ln_st, N, P):
-        B = np.zeros(N * P + 255, dtype=np.float32)
+    def construct_B(self, cols, rows, W, ln_st, N, P):
+        B = np.zeros(N * P + 255)
 
         for p in range(P):
-            B[p * N : p * N + N] = Ln_st[p]
+            B[p * N : p * N + N] = ln_st[p]
+
         B[cols] *= W
 
-        return B
+        return B.astype(np.float32)
 
-    def construct_matrix(self, samples, Ln_shutter_times, num_samples, num_images, constraint=128, lamda=10):
-        Z = samples
-        Ln_st = Ln_shutter_times
-        N = num_samples
-        P = num_images
-
+    def construct_matrix(self, Z, ln_st, N, P, wtype, constraint=127, lamda=10):
         cols = np.arange(N * P)
         rows = np.array(Z).flatten()
 
-        W = self.get_weights(rows, wtype=self.weight_type)
-        A = self.constructA(cols, rows, W, Ln_st, N, P, constraint, lamda)
-        B = self.constructB(cols, rows, W, Ln_st, N, P)
+        W = self.get_weights(rows, wtype)
+        A = self.construct_A(cols, rows, W, ln_st, N, P, constraint, lamda)
+        B = self.construct_B(cols, rows, W, ln_st, N, P)
 
         return A, B
     
-    def solve(self, Z, Ln_st, N, P):
-        A, B = self.construct_matrix(Z, Ln_st, N, P, constraint=128)
+    def solve(self, samples, ln_shutter_times, n_samples, n_images, wtype):
+        A, B = self.construct_matrix(samples, ln_shutter_times, n_samples, n_images, wtype, constraint=127)
+        
         A_inv = np.linalg.pinv(A)
         lnG = np.dot(A_inv, B)[:256]
         print('[Debevec] A inverse solved:', A_inv.shape)
         
         return lnG
 
+
+#
+#   Robertson' Method for HDR Imaging
+#
+class RobertsonMethod(Weights):
     
+    def __init__(self, wtype='triangle'):
+        self.wtype = wtype
+        
+    def fitE(Z, G, st):
+        Wz = self.get_weights(Z, wtype=self.wtype).reshape(P, -1) / 128
+        Gz = G[Z].reshape(P, -1)
+
+        upper = np.sum(Wz * Gz * st, axis=0).astype(np.float32)
+        bottom = np.sum(Wz * st * st, axis=0).astype(np.float32)
+        return upper / bottom
+    
+    def fitG(Z, G, E, st):
+        Z = Z.reshape(P, -1)
+        Wz = self.get_weights(Z, wtype=self.wtype).reshape(P, -1) / 128
+        Wz_Em_st = Wz * (E * st)
+
+        for m in range(256):
+            index = np.where(Z == m)
+            upper = np.sum(Wz_Em_st[index]).astype(np.float32)
+            lower = np.sum(Wz[index]).astype(np.float32)
+            if lower > 0:
+                G[m] = upper / lower
+
+        G /= G[127]
+        return G
+    
+    def solve(Z_bgr, initG, epochs=2):
+        G_bgr = np.array(initG)
+        st = shutter_times.reshape(P, 1)
+
+        for c in range(3):
+            Z = np.array(Z_bgr[c])
+            G = np.array(initG[c])
+
+            for e in range(epochs):
+                print('\rcolor=%d, epoch=%d' % (c, e), end='    ')
+                # Compute Ei (energy of each pixel)
+                E = self.fitE(Z, G, st)
+                # Compute Gm
+                G = self.fitG(Z, G, E, st)
+
+            G_bgr[c] = G
+
+        return np.log(G_bgr).astype(np.float32)
+
+
 #
 #   Tone Mapping: Photographic Global / Local, Bilateral
 #
-
 class ToneMapping():
    
     def __init__(self):
         self.bgr_string = ['blue', 'green', 'red']
         
-    def photographic_global(self, hdr, d=1e-6, a=0.7):
+    def photographic_global(self, hdr, d=1e-6, a=0.5):
+        print('[Photographic Global]')
+        Lw = hdr
+        Lw_ave = np.exp(np.mean(np.log(d + Lw)))
+        Lm = (a / Lw_ave) * Lw
+        Lm_max = np.max(Lm) # Lm_white
+        Ld = (Lm * (1 + (Lm / (Lm_max ** 2)))) / (1 + Lm)
+        ldr = np.clip(np.array(Ld * 255), 0, 255)
         
-        ldr = np.zeros_like(hdr, dtype=np.float32)
+        return ldr.astype(np.uint8)
         
-        for c in range(3):
-            print('\r[Photographic Global] color: ' + self.bgr_string[c], end=' ' * 10)
-            Lw = hdr[:, :, c]
-            Lw_ave = np.exp(np.mean(np.log(d + Lw)))
-            Lm = (a / Lw_ave) * Lw
-            Lm_max = np.max(Lm) # Lm_white
-            Ld = Lm * (1 + (Lm / Lm_max ** 2)) / (1 + Lm)
-            ldr[:, :, c] = np.array(Ld * 255).astype(np.uint8)
-        print()
-        
-        return ldr
-        
-    def gaussian_blurs(self, im, smax=25, a=0.7, fi=8.0, epsilon=0.01):
+    def gaussian_blurs(self, im, smax=25, a=0.5, fi=8.0, epsilon=0.01):
         cols, rows = im.shape
         blur_prev = im
         num_s = int((smax+1)/2)
@@ -190,25 +226,24 @@ class ToneMapping():
         
         return blur_smax
         
-    def photographic_local(self, hdr, d=1e-6, a=0.7):
+    def photographic_local(self, hdr, d=1e-6, a=0.5):
         ldr = np.zeros_like(hdr, dtype=np.float32)
+        Lw_ave = np.exp(np.mean(np.log(d + hdr)))
         
         for c in range(3):
-            print('[Photographic Local] color: ' + self.bgr_string[c], end=' ' * 10)
             Lw = hdr[:, :, c]
-            Lw_ave = np.exp(np.mean(np.log(d + Lw)))
             Lm = (a / Lw_ave) * Lw
             Ls = self.gaussian_blurs(Lm)
             Ld = Lm / (1 + Ls)
-            ldr[:, :, c] = np.array(Ld * 255).astype(np.uint8)
-        
-        return ldr
+            ldr[:, :, c] = np.clip(np.array(Ld * 255), 0, 255)
+
+        return ldr.astype(np.uint8)
     
     def bilateral_filtering(self, hdr):
         ldr = np.zeros_like(hdr, dtype=np.float32)
         
         for c in range(3):
-            print('\r[Bilateral Filtering] color: ' + self.bgr_string[c], end=' ' * 10)
+            print('[Bilateral Filtering] color: ' + self.bgr_string[c], end=' ')
             
             Lw = hdr[:, :, c]
             log_Lw = np.log(Lw)
@@ -219,7 +254,8 @@ class ToneMapping():
             log_Ld = log_base * cf + log_detail
             Ld = np.exp(log_Ld) / np.exp(cf * log_base.max())
             
-            ldr[:, :, c] = Ld * 255
+            ldr[:, :, c] = np.clip(Ld * 255, 0, 255)
+
         print()
         
-        return ldr
+        return ldr.astype(np.uint8)
