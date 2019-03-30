@@ -168,13 +168,15 @@ class RobertsonMethod(Weights):
             G = np.array(initG[c])
 
             for e in range(epochs):
-                print('\rcolor=%d, epoch=%d' % (c, e), end='    ')
+                print('\r[Robertson] color=%d, epoch=%d' % (c, e), end='    ')
                 # Compute Ei (energy of each pixel)
                 E = self.fitE(Z, G, st)
                 # Compute Gm
                 G = self.fitG(Z, G, E, st)
 
             G_bgr[c] = G
+
+        print()
 
         return np.log(G_bgr).astype(np.float32)
 
@@ -239,23 +241,24 @@ class ToneMapping():
 
         return ldr.astype(np.uint8)
     
-    def bilateral_filtering(self, hdr):
-        ldr = np.zeros_like(hdr, dtype=np.float32)
-        
-        for c in range(3):
-            print('[Bilateral Filtering] color: ' + self.bgr_string[c], end=' ')
-            
-            Lw = hdr[:, :, c]
-            log_Lw = np.log(Lw)
-            log_base = cv2.bilateralFilter(log_Lw, 9, 5, 5)
-            log_detail = log_Lw - log_base
-            
-            cf = (np.log(5)) / (log_base.max() - log_base.min()) # compression factor
-            log_Ld = log_base * cf + log_detail
-            Ld = np.exp(log_Ld) / np.exp(cf * log_base.max())
-            
-            ldr[:, :, c] = np.clip(Ld * 255, 0, 255)
+    def durand_bilateral(self, hdr):
+        ldr = np.zeros_like(hdr)
 
-        print()
+        b, g, r = 1, 40, 20
+
+        Lw = (hdr[:, :, 0] * b + hdr[:, :, 1] * g + hdr[:, :, 2] * r) / (b + g + r)
+        log_Lw = np.log10(Lw)
+        log_base = cv2.bilateralFilter(log_Lw, 5, 15, 15)
+        log_detail = log_Lw - log_base
+        
+        cf = 2 / (np.max(log_base) - np.min(log_base)) # compression factor
+        log_Ld = cf * (log_base - np.max(log_base)) + log_detail
+        Ld = np.power(10, log_Ld)
+
+        ldr[:, :, 0] = (hdr[:, :, 0] / Lw) * Ld
+        ldr[:, :, 1] = (hdr[:, :, 1] / Lw) * Ld
+        ldr[:, :, 2] = (hdr[:, :, 2] / Lw) * Ld
+
+        ldr = np.clip((ldr ** 0.3) * 255, 0, 255)
         
         return ldr.astype(np.uint8)

@@ -77,7 +77,7 @@ class HDR(Weights):
         print('[Read] shutter times:', shutter_times_string)
         return np.array(shutter_times, dtype=np.float32), shutter_times_string
         
-    def sample_points(self, images, n_samples=150, random_seed=1208):
+    def sample_pixels(self, images, n_samples=150, random_seed=1208):
         print('[Sample] samples per image: N =', n_samples)
 
         height, width, channels = images[0].shape
@@ -91,8 +91,10 @@ class HDR(Weights):
         return [[images[p][yv, xv, c] for p in range(len(images))] for c in range(channels)]
     
     def solve_hdr(self, images, hdr_method, ln_st, n_samples, n_epochs, wtype):
+        n_images = len(images)
+
         if hdr_method == 'debevec':
-            samples_bgr = self.sample_points(images, n_samples)
+            samples_bgr = self.sample_pixels(images, n_samples)
             return [self.debevec_method.solve(sample, ln_st, n_samples, n_images, wtype) for sample in samples_bgr]
         
         elif hdr_method == 'robertson':
@@ -115,7 +117,7 @@ class HDR(Weights):
             filepath = osp.join(savedir, "tonemap_photographic_local.png")
         
         elif tm_method == 'bilateral':
-            ldr = self.tone_mapping.bilateral_filtering(radiance_bgr)
+            ldr = self.tone_mapping.durand_bilateral(radiance_bgr)
             filepath = osp.join(savedir, "tonemap_bilateral.png")
 
         else:
@@ -200,7 +202,7 @@ class HDR(Weights):
 
         fig.savefig(osp.join(savedir, 'radiance.png'), bbox_inches='tight', dpi=256)
         
-    def solve(self, indir, savedir, hdr_method='debevec', tm_method='photographic_local', n_samples=150, n_epochs=5, wtype='triangle'):
+    def solve(self, indir, savedir, hdr_method='debevec', tm_method='photographic_local', n_samples=150, n_epochs=5, wtype='triangle', plot=True):
         if not self.check_path(indir, savedir):
             return None
 
@@ -222,9 +224,10 @@ class HDR(Weights):
         ldr = self.solve_tm(radiance_bgr, tm_method, savedir)
         
         # plot result
-        self.plot_images(images, st_str, savedir)
-        self.plot_response_curve(lnG_bgr, savedir)
-        self.plot_radiance(radiance_bgr, savedir)
+        if plot:
+            self.plot_images(images, st_str, savedir)
+            self.plot_response_curve(lnG_bgr, savedir)
+            self.plot_radiance(radiance_bgr, savedir)
         
         return lnG_bgr, radiance_bgr, ldr
 
