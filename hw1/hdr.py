@@ -19,7 +19,18 @@ from timer import Timer
 
 
 parser = ArgumentParser('High Dynamic Range Imaging')
-parser.add_argument('input_dir', default='cksmh', nargs='?', help='input directory of images with different shutter times.')
+parser.add_argument('indir', default='cksmh', nargs='?', help='Input directory of images with different shutter times.')
+parser.add_argument('-n', default=150, type=int, help='Number of sampled points for Debevec method.')
+parser.add_argument('-e', default=5, type=int, help='Number of epochs for Robertson method.')
+parser.add_argument('-d', default=5, type=int, help='Number of depth for image alignment.')
+parser.add_argument('-r', default=1, type=float, help='Resize ratio.')
+parser.add_argument('-w', default='triangle', choices=['triangle', 'gaussian', 'uniform'], type=str, help='Weight type.')
+parser.add_argument('--lambda', default=10, type=float, help='Lambda for Debevec method.')
+parser.add_argument('--seed', default=1028, type=int, help='Random seed.')
+parser.add_argument('--hdr', default='debevec', choices=['debevec', 'robertson'], type=str, help='HDR algorithm.')
+parser.add_argument('--tm', default='local', choices=['all', 'local', 'global', 'bilateral'], type=str, help='Tone mapping method.')
+parser.add_argument('--no-plot', action='store_true', dest='no_plot', default=False, help='Plot results.')
+
 
 t = Timer()
 
@@ -42,16 +53,18 @@ class HDR(Weights):
 
         return True
 
-    def read_images(self, dirname):
+    def read_images(self, dirname, r):
         def is_image(filename):
-            name, ext = osp.splitext(osp.basename(filename))
+            name, ext = osp.splitext(osp.basename(filename.lower()))
             return ext in ['.jpg', '.png', '.gif']
         
         images = []
 
         for filename in np.sort(os.listdir(dirname)):
             if is_image(filename):
-                images += [cv2.imread(dirname + '/' + filename)]
+                im = cv2.imread(osp.join(dirname, filename))
+                h, w, c = im.shape
+                images += [cv2.resize(im, (int(w * r), int(h * r)))]
 
         print('[Read] image shape:', images[0].shape)
         print('[Read] images: P =', len(images))
@@ -90,6 +103,13 @@ class HDR(Weights):
 
         return [[images[p][yv, xv, c] for p in range(len(images))] for c in range(channels)]
     
+    def solve_alignment(self, images, d=4):
+        for i in range(1, len(images)):
+            print('\r[Alignment] %d' % i, end='')
+            images[i] = self.image_alignment.fit(images[i], images[i-1], d)
+        print()
+        return images
+
     def solve_hdr(self, images, hdr_method, ln_st, n_samples, n_epochs, wtype):
         n_images = len(images)
 
@@ -102,29 +122,31 @@ class HDR(Weights):
             all_bgr = [[images[p][:, :, c] for p in range(n_images)] for c in range(channels)]
             init_G = [np.exp(np.arange(0, 1, 1 / 256))] * channels
             return [self.robertson_method.solve(Z, init_G, n_epochs) for Z in all_bgr]
-        
+
         else:
             print('[HDR] unknown hdr method:', hdr_method)
             return None
 
     def solve_tm(self, radiance_bgr, tm_method, savedir):
-        if tm_method == 'photographic_global':
+        if tm_method in ['global', 'all']:
             ldr = self.tone_mapping.photographic_global(radiance_bgr)
-            filepath = osp.join(savedir, "tonemap_photographic_global.png")
+            filepath = osp.join(savedir, "tonemap_global.png")
+            cv2.imwrite(filepath, ldr)
         
-        elif tm_method == 'photographic_local':
+        elif tm_method in ['local', 'all']:
             ldr = self.tone_mapping.photographic_local(radiance_bgr)
-            filepath = osp.join(savedir, "tonemap_photographic_local.png")
+            filepath = osp.join(savedir, "tonemap_local.png")
+            cv2.imwrite(filepath, ldr)
         
-        elif tm_method == 'bilateral':
+        elif tm_method in ['bilateral', 'all']:
             ldr = self.tone_mapping.durand_bilateral(radiance_bgr)
             filepath = osp.join(savedir, "tonemap_bilateral.png")
+            cv2.imwrite(filepath, ldr)
 
         else:
             print('[Tone Mapping] unknown tone mapping method:', tm_method)
             return None
 
-        cv2.imwrite(filepath, ldr)
         return ldr
 
     def compute_radiance(self, images, lnG_bgr, ln_st, wtype, savedir):
@@ -202,13 +224,24 @@ class HDR(Weights):
 
         fig.savefig(osp.join(savedir, 'radiance.png'), bbox_inches='tight', dpi=256)
         
-    def solve(self, indir, savedir, hdr_method='debevec', tm_method='photographic_local', n_samples=150, n_epochs=5, wtype='triangle', plot=True):
+    def solve(self, indir, savedir, 
+        hdr_method = 'debevec', 
+        tm_method = 'local', 
+        n_samples = 150, 
+        n_epochs = 5, 
+        n_depth = 5,
+        wtype = 'triangle', 
+        plot = True,
+        resize_ratio = 1):
         if not self.check_path(indir, savedir):
             return None
 
         # read images
-        images = self.read_images(indir)
+        images = self.read_images(indir, r=resize_ratio)
         n_images = len(images)
+
+        # image alignment
+        images = self.solve_alignment(images, n_depth)
 
         # read shutter times
         st, st_str = self.read_shutter_times(indir)
@@ -236,8 +269,17 @@ if __name__ == '__main__':
     args = vars(parser.parse_args())
     
     # Example Usage
-    indir = args['input_dir']
+    indir = args['indir']
     savedir = osp.join(indir, 'res')
     
     hdr = HDR()
-    lnG, radiance, ldr = hdr.solve(indir, savedir)
+    lnG, radiance, ldr = hdr.solve(
+        indir, savedir, 
+        hdr_method = args['hdr'],
+        tm_method = args['tm'],
+        n_samples = args['n'],
+        n_epochs = args['e'],
+        n_depth = args['d'],
+        wtype = args['w'],
+        plot = not args['no_plot'],
+        resize_ratio = args['r'])
