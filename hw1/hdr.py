@@ -133,17 +133,17 @@ class HDR(Weights):
             filepath = osp.join(savedir, "tonemap_global.png")
             cv2.imwrite(filepath, ldr)
         
-        elif tm_method in ['local', 'all']:
+        if tm_method in ['local', 'all']:
             ldr = self.tone_mapping.photographic_local(radiance_bgr)
             filepath = osp.join(savedir, "tonemap_local.png")
             cv2.imwrite(filepath, ldr)
         
-        elif tm_method in ['bilateral', 'all']:
+        if tm_method in ['bilateral', 'all']:
             ldr = self.tone_mapping.durand_bilateral(radiance_bgr)
             filepath = osp.join(savedir, "tonemap_bilateral.png")
             cv2.imwrite(filepath, ldr)
 
-        else:
+        if tm_method not in ['global', 'local', 'bilateral', 'all']:
             print('[Tone Mapping] unknown tone mapping method:', tm_method)
             return None
 
