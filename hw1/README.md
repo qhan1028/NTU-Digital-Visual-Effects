@@ -70,16 +70,14 @@ python3 hdr.py --help
   * Global Operator
   * Local Operator
   
-* Bilateral  
+* Bilateral
   We implemented opencv bilateral filtering to complete this algorithm.
-  
-## Comparison
 
-* Input Images
+## 3. Comparison
 
-  ![](data/memorial/res/debevec/input_images.png)
+* Input Images - `data/memorial`
 
-### Debevec's Method
+### 3.1. Debevec's Method
 
 * Response Curve
 
@@ -91,11 +89,11 @@ python3 hdr.py --help
 
 * Tonemapping
 
-| Photographic Global Operator | Photographic Local Operator | Bilateral |  
-| :--------------------------: | :-------------------------: | :-------: |  
+| Photographic Global Operator | Photographic Local Operator | Bilateral |
+| :--------------------------: | :-------------------------: | :-------: |
 | ![](data/memorial/res/debevec/tonemap_global.png) | ![](data/memorial/res/debevec/tonemap_local.png) | ![](data/memorial/res/debevec/tonemap_bilateral.png) |
 
-### Robertson's Method
+### 3.2. Robertson's Method
 
 * Response Curve
 
@@ -107,35 +105,39 @@ python3 hdr.py --help
 
 * Tonemapping
 
-| Photographic Global Operator | Photographic Local Operator | Bilateral |  
-| :--------------------------: | :-------------------------: | :-------: |  
+| Photographic Global Operator | Photographic Local Operator | Bilateral |
+| :--------------------------: | :-------------------------: | :-------: |
 | ![](data/memorial/res/robertson/tonemap_global.png) | ![](data/memorial/res/robertson/tonemap_local.png) | ![](data/memorial/res/robertson/tonemap_bilateral.png) |
 
-## Our HDR Photo
+## 4. Our HDR Photo
 
-* Parameters
+* Input Images - `data/ntu-library`
 
-  * Image Alignment
-  
-    * depth = $5$
-    
-  * Debevec's Method
-  
-    * $\lambda = 10$
-    
-  * Photographic Local Operator
-  
-    * $a=0.25$
-    * $\delta=10^{-6}$
-    
+### 4.1. Parameter
+
+* Image Alignment
+
+  * depth = $5$
+
+* Debevec's Method
+
+  * $\lambda = 10$
+
+* Photographic Local Operator
+
+  * $a=0.25$
+  * $\delta=10^{-6}$
+
+### 4.2. Result
+
 * Response Curve - `data/ntu-library/res/debevec/response_curve.png`
 
   ![](data/ntu-library/res/debevec/response_curve.png)
-    
-* Radiance Map - `data/ntu-library/res/debevec/radiance.hdr`
+
+* Radiance - `data/ntu-library/res/debevec/radiance.hdr`
 
   ![](data/ntu-library/res/debevec/radiance.png)
 
-* Tonemapping Result - `data/ntu-library/res/debevec/tonemap_local.png`
+* Tonemapping - `data/ntu-library/res/debevec/tonemap_local.png`
 
   ![](data/ntu-library/res/debevec/tonemap_local.png)
