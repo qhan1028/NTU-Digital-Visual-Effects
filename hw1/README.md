@@ -46,7 +46,11 @@ python3 hdr.py [input_directory] --savedir [output_directorp]
 ### 1.2. Advanced Usage
 
 * Please check the program document.
+
+```
 python3 hdr.py --help
+```
+
 ## 2. Code Works
 
 ### 2.1. Image Alignment
@@ -109,16 +113,29 @@ python3 hdr.py --help
 
 ## Our HDR Photo
 
-![](data/ntu-library/res/debevec/tonemap_local.png)
-
 * Parameters
 
   * Image Alignment
+  
     * depth = $5$
     
   * Debevec's Method
+  
     * $\lambda = 10$
     
   * Photographic Local Operator
+  
     * $a=0.25$
     * $\delta=10^{-6}$
+    
+* Response Curve - `data/ntu-library/res/debevec/response_curve.png`
+
+  ![](data/ntu-library/res/debevec/response_curve.png)
+    
+* Radiance Map - `data/ntu-library/res/debevec/radiance.hdr`
+
+  ![](data/ntu-library/res/debevec/radiance.png)
+
+* Tonemapping Result - `data/ntu-library/res/debevec/tonemap_local.png`
+
+  ![](data/ntu-library/res/debevec/tonemap_local.png)
