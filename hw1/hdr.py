@@ -19,7 +19,8 @@ from timer import Timer
 
 
 parser = ArgumentParser('High Dynamic Range Imaging')
-parser.add_argument('indir', default='cksmh', nargs='?', help='Input directory of images with different shutter times.')
+parser.add_argument('indir', default='cksmh', nargs='?', help='Directory of input images with text file of shutter times.')
+parser.add_argument('--savedir', default='res', type=str, help='Output directory.')
 parser.add_argument('-n', default=150, type=int, help='Number of sampled points for Debevec method.')
 parser.add_argument('-e', default=5, type=int, help='Number of epochs for Robertson method.')
 parser.add_argument('-d', default=5, type=int, help='Number of depth for image alignment.')
@@ -28,7 +29,7 @@ parser.add_argument('-w', default='triangle', choices=['triangle', 'gaussian', '
 parser.add_argument('--lambda', default=10, type=float, help='Lambda for Debevec method.')
 parser.add_argument('--seed', default=1028, type=int, help='Random seed.')
 parser.add_argument('--hdr', default='debevec', choices=['debevec', 'robertson'], type=str, help='HDR algorithm.')
-parser.add_argument('--tm', default='local', choices=['all', 'local', 'global', 'bilateral'], type=str, help='Tone mapping method.')
+parser.add_argument('--tm', default='all', choices=['all', 'local', 'global', 'bilateral'], type=str, help='Tone mapping method.')
 parser.add_argument('--no-plot', action='store_true', dest='no_plot', default=False, help='Plot results.')
 
 
@@ -39,7 +40,7 @@ class HDR(Weights):
     def __init__(self):
         self.image_alignment = ImageAlignment()
         self.debevec_method = DebevecMethod()
-        self.Robertson_method = RobertsonMethod()
+        self.robertson_method = RobertsonMethod()
         self.tone_mapping = ToneMapping()
         self.colors = ['blue', 'green', 'red']
 
@@ -105,7 +106,7 @@ class HDR(Weights):
     
     def solve_alignment(self, images, d=4):
         for i in range(1, len(images)):
-            print('\r[Alignment] %d' % i, end='')
+            print('\r[Alignment] %d' % (i + 1), end='')
             images[i] = self.image_alignment.fit(images[i], images[i-1], d)
         print()
         return images
@@ -121,7 +122,7 @@ class HDR(Weights):
             h, w, channels = images[0].shape
             all_bgr = [[images[p][:, :, c] for p in range(n_images)] for c in range(channels)]
             init_G = [np.exp(np.arange(0, 1, 1 / 256))] * channels
-            return [self.robertson_method.solve(Z, init_G, n_epochs) for Z in all_bgr]
+            return self.robertson_method.solve(all_bgr, init_G, np.exp(ln_st), n_epochs)
 
         else:
             print('[HDR] unknown hdr method:', hdr_method)
@@ -269,12 +270,10 @@ if __name__ == '__main__':
     args = vars(parser.parse_args())
     
     # Example Usage
-    indir = args['indir']
-    savedir = osp.join(indir, 'res')
-    
     hdr = HDR()
     lnG, radiance, ldr = hdr.solve(
-        indir, savedir, 
+        indir = args['indir'],
+        savedir = args['savedir'], 
         hdr_method = args['hdr'],
         tm_method = args['tm'],
         n_samples = args['n'],

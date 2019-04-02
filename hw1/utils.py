@@ -58,11 +58,11 @@ class ImageAlignment():
         min_error = np.inf
         best_dx, best_dy = 0, 0
         Im_tar = self.gradient_magnitude(tar)
+        Im_src = self.gradient_magnitude(src)
 
         for dx in range(-1, 2):
             for dy in range(-1, 2):
-                tmp_src = cv2.warpAffine(src, self.translation_matrix(x + dx, y + dy), (w, h))
-                Im_tmp_src = self.gradient_magnitude(tmp_src)
+                Im_tmp_src = cv2.warpAffine(Im_src, self.translation_matrix(x + dx, y + dy), (w, h))
 
                 error = np.sum(np.abs(np.sign(Im_tmp_src - Im_tar)))
                 if error < min_error:
@@ -152,7 +152,8 @@ class RobertsonMethod(Weights):
     def __init__(self, wtype='triangle'):
         self.wtype = wtype
         
-    def fitE(Z, G, st):
+    def fitE(self, Z, G, st):
+        P = st.shape[0]
         Wz = self.get_weights(Z, wtype=self.wtype).reshape(P, -1) / 128
         Gz = G[Z].reshape(P, -1)
 
@@ -160,7 +161,8 @@ class RobertsonMethod(Weights):
         bottom = np.sum(Wz * st * st, axis=0).astype(np.float32)
         return upper / bottom
     
-    def fitG(Z, G, E, st):
+    def fitG(self, Z, G, E, st):
+        P = st.shape[0]
         Z = Z.reshape(P, -1)
         Wz = self.get_weights(Z, wtype=self.wtype).reshape(P, -1) / 128
         Wz_Em_st = Wz * (E * st)
@@ -175,16 +177,17 @@ class RobertsonMethod(Weights):
         G /= G[127]
         return G
     
-    def solve(Z_bgr, initG, epochs=2):
+    def solve(self, Z_bgr, initG, shutter_times, epochs=2):
         G_bgr = np.array(initG)
-        st = shutter_times.reshape(P, 1)
+        st = shutter_times.reshape(-1, 1)
+        colors = ['blue', 'green', 'red']
 
         for c in range(3):
             Z = np.array(Z_bgr[c])
             G = np.array(initG[c])
 
             for e in range(epochs):
-                print('\r[Robertson] color=%d, epoch=%d' % (c, e), end='    ')
+                print('\r[Robertson] %s, epoch=%d' % (colors[c], e+1), end='    ')
                 # Compute Ei (energy of each pixel)
                 E = self.fitE(Z, G, st)
                 # Compute Gm
@@ -244,7 +247,7 @@ class ToneMapping():
         
         return blur_smax
         
-    def photographic_local(self, hdr, d=1e-6, a=0.5):
+    def photographic_local(self, hdr, d=1e-6, a=0.25):
         ldr = np.zeros_like(hdr, dtype=np.float32)
         Lw_ave = np.exp(np.mean(np.log(d + hdr)))
         
