@@ -27,6 +27,7 @@ parser.add_argument('-d', default=5, type=int, help='Number of depth for image a
 parser.add_argument('-r', default=1, type=float, help='Resize ratio.')
 parser.add_argument('-w', default='triangle', choices=['triangle', 'gaussian', 'uniform'], type=str, help='Weight type.')
 parser.add_argument('--lambda', default=10, type=float, help='Lambda for Debevec method.')
+parser.add_argument('--alpha', default=0.5, type=float, help='Alpha for photographic tonemapping.')
 parser.add_argument('--seed', default=1028, type=int, help='Random seed.')
 parser.add_argument('--hdr', default='debevec', choices=['debevec', 'robertson'], type=str, help='HDR algorithm.')
 parser.add_argument('--tm', default='all', choices=['all', 'local', 'global', 'bilateral'], type=str, help='Tone mapping method.')
@@ -128,14 +129,14 @@ class HDR(Weights):
             print('[HDR] unknown hdr method:', hdr_method)
             return None
 
-    def solve_tm(self, radiance_bgr, tm_method, savedir):
+    def solve_tm(self, radiance_bgr, tm_method, alpha, savedir):
         if tm_method in ['global', 'all']:
-            ldr = self.tone_mapping.photographic_global(radiance_bgr)
+            ldr = self.tone_mapping.photographic_global(radiance_bgr, a=alpha)
             filepath = osp.join(savedir, "tonemap_global.png")
             cv2.imwrite(filepath, ldr)
         
         if tm_method in ['local', 'all']:
-            ldr = self.tone_mapping.photographic_local(radiance_bgr)
+            ldr = self.tone_mapping.photographic_local(radiance_bgr, a=alpha)
             filepath = osp.join(savedir, "tonemap_local.png")
             cv2.imwrite(filepath, ldr)
         
@@ -232,6 +233,7 @@ class HDR(Weights):
         n_epochs = 5, 
         n_depth = 5,
         wtype = 'triangle', 
+        alpha = 0.5,
         plot = True,
         resize_ratio = 1):
         if not self.check_path(indir, savedir):
@@ -255,7 +257,7 @@ class HDR(Weights):
         radiance_bgr = self.compute_radiance(images, lnG_bgr, ln_st, wtype, savedir)
         
         # convert HDR to LDR by tonemapping
-        ldr = self.solve_tm(radiance_bgr, tm_method, savedir)
+        ldr = self.solve_tm(radiance_bgr, tm_method, alpha, savedir)
         
         # plot result
         if plot:
@@ -280,5 +282,6 @@ if __name__ == '__main__':
         n_epochs = args['e'],
         n_depth = args['d'],
         wtype = args['w'],
+        alpha = args['alpha'],
         plot = not args['no_plot'],
         resize_ratio = args['r'])
