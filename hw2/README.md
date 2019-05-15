@@ -2,8 +2,8 @@
 
 ## 0. Team Members
 
-* 資工四 b03902032 周家宇
-* 資工四 b03902089 林良翰
+* 網媒碩一 r07944007 林良翰
+* 資工碩一 r07922100 楊力權
 
  ## 1. Prerequisites
 
@@ -67,16 +67,6 @@
 
 
 
-
-
-
-
-
-
-
-
-
-
 ## 3. Implementation
 
 ###  3.1. Parameters
@@ -110,46 +100,31 @@
 
 
 
-
-
-
-
 ###  3.3. Results
 
 ####   Parrington
 
-* ![prtn_pano](res/prtn_pano.jpg)
-
+* ![prtn-pano](res/prtn-pano.jpg)
 * 18 images
 * focal length ≈ 705
 
-####   CSIE
+#### Beach Hotel
 
-* ![csie_pano](res/csie_pano.jpg)
-
-* 11 images
-* focal length ≈ 1710
+- ![beach-hotel](res/beach-hotel-pano.jpg)
+- 15 images
+- focal length ≈ 970
 
 ####    NTU Lake (our photo)
 
-* ![lake_pano](res/lake_pano.jpg)
-
+* ![ntu-lake-pano](res/ntu-lake-pano.jpg)
 * 10 images
 * focal length ≈ 525
 
+#### NTU Library (our photo)
 
-
-
-
-
-
-
-
-
-
-
-
-
+- ![ntu-library-pano](res/ntu-library-pano.jpg)
+- 20 images
+- focal length ≈ 670
 
 
 

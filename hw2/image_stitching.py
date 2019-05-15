@@ -9,6 +9,7 @@ import argparse
 import cv2
 import os
 import os.path as osp
+from plot import *
 from utils import *
 
 
@@ -36,7 +37,10 @@ def read_data(dirname, fix_h=480):
     if dirname[-1] != '/': dirname += '/'
     
     rgbs, focals = [], []
-    for filename in os.listdir(dirname):
+    filenames = list(os.listdir(dirname))
+    filenames.sort()
+    print(filenames)
+    for filename in filenames:
         if filename == 'pano.jpg': continue
             
         if file_ext(filename) in ['.png', '.jpg', '.gif', '.JPG']:
@@ -67,28 +71,48 @@ def process_images(images, focals,
                    use_cw=True, save_cw=False, 
                    r_ksize=9, r_sigma=3, r_k=0.04, r_thres=0.5,
                    o_bins=8, o_ksize=9,
-                   m_thres=0.8, m_n=4, m_K=1000):
+                   m_thres=0.8, m_n=4, m_K=1000, 
+                   visualize=False, right_to_left=False):
     if use_cw:
         print('\n[Cylinder Warping]')
         print('focal length:\n', focals)
         images = cylinder_warping(images, focals, save_cw)
 
+    height, width, channels = images[0].shape
+
     print('\n[Feature Detection, Descriptors]')
-    Des = []
+    Des_left, Des_right = [], []
     for i in range(len(images)):
         print(i)
         im_gray = cv2.cvtColor(images[i], cv2.COLOR_RGB2GRAY)
         R, Ix, Iy, Ix2, Iy2 = calculate_R(im_gray, r_ksize, r_sigma, r_k)
         fpx, fpy = find_local_max_R(R, r_thres)
         ori, ori_1hot, theta, theta_bins, M = get_orientations(Ix, Iy, Ix2, Iy2, o_bins, o_ksize)
-        Des += [get_descriptors(fpx, fpy, ori_1hot, theta)]
+        des_left, des_right = get_descriptors(fpx, fpy, ori_1hot, theta, width / 2)
+        Des_left += [des_left]
+        Des_right += [des_right]
+
+        if visualize:
+            plot_features(images[i], R, fpx, fpy, Ix, Iy, i=i)
         
     print('\n[Feature Matching]')
     Dxy = []
     for i in range(len(images)-1):
         print(i)
-        matches = find_matches(Des[i], Des[i+1], m_thres)
-        Dxy += [ransac(matches, Des[i], Des[i+1], m_n, m_K)]
+
+        if right_to_left:
+            matches = find_matches(Des_left[i], Des_right[i+1], m_thres)
+            Dxy += [ransac(matches, Des_left[i], Des_right[i+1], m_n, m_K)]
+
+            if visualize:
+                plot_matches(images[i], images[i+1], Des_left[i], Des_right[i+1], matches, i)
+
+        else:
+            matches = find_matches(Des_right[i], Des_left[i+1], m_thres)
+            Dxy += [ransac(matches, Des_right[i], Des_left[i+1], m_n, m_K)]
+            
+            if visualize:
+                plot_matches(images[i], images[i+1], Des_right[i], Des_left[i+1], matches, i)
 
     print('\n[Blending]')
     pano = blend_linear(images, Dxy)
@@ -119,7 +143,7 @@ if __name__ == '__main__':
     parser.add_argument('-b', type=int, nargs='?', default=8, help='Orientation bins.')
     parser.add_argument('--o-ksize', type=int, nargs='?', default=9, help='Orientation blur kernel size.')
     parser.add_argument('-m', type=float, nargs='?', default=0.8, help='Matching threshold.')
-    parser.add_argument('-n', type=int, nargs='?', default=4, help='RANSAC samples.')
+    parser.add_argument('-n', type=int, nargs='?', default=10, help='RANSAC samples.')
     parser.add_argument('-K', type=int, nargs='?', default=1000, help='RANSAC iterations.')
     args = vars(parser.parse_args())
     
@@ -133,4 +157,4 @@ if __name__ == '__main__':
                               r_ksize=args['r_ksize'], r_sigma=args['s'], r_k=args['k'], r_thres=args['r'],
                               o_bins=args['b'], o_ksize=args['o_ksize'],
                               m_thres=args['m'], m_n=args['n'], m_K=args['K'])
-    save_image(panorama, dirname[:-1] + '_pano.jpg')
+    save_image(panorama, dirname[:-1] + '-pano.jpg')

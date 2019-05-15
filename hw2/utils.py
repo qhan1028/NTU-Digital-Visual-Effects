@@ -161,7 +161,7 @@ def get_orientations(Ix, Iy, Ix2, Iy2, bins=8, ksize=9):
     
     return ori, ori_1hot, theta, theta_bins, M
 
-def get_descriptors(fpx, fpy, ori, theta):
+def get_descriptors(fpx, fpy, ori, theta, half_width):
     
     bins, h, w = ori.shape
 
@@ -188,16 +188,23 @@ def get_descriptors(fpx, fpy, ori, theta):
         for fy in subpatch_offsets:
             for fx in subpatch_offsets:
                 vector += get_sub_vector(fy, fx, 4, 4, ori_rotated)
+                
         return vector
 
-    descriptors = []
+    descriptors_left = []
+    descriptors_right = []
     for y, x in zip(fpy, fpx):
         vector = get_vector(y, x)
+
         if np.sum(vector) > 0:
-            descriptors.append({'y': y, 'x': x, 'vector': vector})
+            if x <= half_width:
+                descriptors_left.append({'y': y, 'x': x, 'vector': vector})
+
+            else:
+                descriptors_right.append({'y': y, 'x': x, 'vector': vector})
     
-    print('descriptors:', len(descriptors))    
-    return descriptors
+    print('descriptors: (left: %d, right: %d)' % (len(descriptors_left), len(descriptors_right)))
+    return descriptors_left, descriptors_right
 
 
 ########################
@@ -232,7 +239,7 @@ def find_matches(des1, des2, thres=0.8):
 #                                      #
 ########################################
 
-def ransac(matches, des1, des2, n=4, K=1000):
+def ransac(matches, des1, des2, n=10, K=1000):
     matches = np.array(matches)
     m1, m2 = matches[:, 0], matches[:, 1]
     
