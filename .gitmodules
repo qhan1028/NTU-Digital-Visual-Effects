@@ -1,0 +1,6 @@
+[submodule "hw1"]
+	path = hw1
+	url = https://github.com/qhan1028/HDR-Imaging.git
+[submodule "hw2"]
+	path = hw2
+	url = https://github.com/qhan1028/Image-Stitching.git
